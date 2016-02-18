@@ -39,12 +39,13 @@ func action() {
 		log.Fatal("Daemon is not up")
 	}
 
-	//log.Print("Source hash resolved to " + sourceHash)
-
 	sourceHash, err := shell.ResolvePath(*src)
 	if err != nil {
 		log.Fatal("Specified source could not be resolved: " + err.Error())
 	}
+
+	log.Print("Source hash resolved to " + sourceHash)
+
 	destinationDir, err := os.Stat(*dst)
 	if err != nil && os.IsNotExist(err) {
 		log.Fatal("Destination directory does not exist.")
@@ -136,7 +137,18 @@ func sync(s *shell.Shell, srcHash string, target string) {
 
 			outFile, err := os.Create(itemPathOnFs)
 			if err != nil {
-				log.Fatal(err.Error())
+				// Try creating the container directory
+				// (ipfs generates unixfs structures that don't contain directories for non-empty directories)
+				err := os.MkdirAll(target, os.ModePerm)
+				if err != nil {
+					// TODO: Is ENOTDIR possible here? If it is, then that should be handled by deleting the non-dir path. Maybe it is not possible if we process the entries in a sorted manner.
+					log.Fatal(err.Error())
+				}
+				//Okay, now lets try again with the parent directory in place now.
+				outFile, err = os.Create(itemPathOnFs)
+				if err != nil {
+					log.Fatal(err.Error())
+				}
 			}
 
 			_, err = io.Copy(outFile, r)
