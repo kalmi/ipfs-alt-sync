@@ -9,7 +9,10 @@ import (
 	"io"
 	"io/ioutil"
 	"math/big"
+	"time"
 )
+
+const ALT_STREAM_NAME = "ipfs-alt-sync"
 
 var (
 	src *string
@@ -63,9 +66,6 @@ func action() {
 	log.Print(skippedFileCount)
 }
 
-
-
-
 func sync(s *shell.Shell, srcHash string, target string) {
 	list, err := s.List(srcHash)
 	if err != nil {
@@ -118,12 +118,11 @@ func sync(s *shell.Shell, srcHash string, target string) {
 			processedFileCount += 1
 
 			itemPathOnFs := path.Join(target, item.Name)
-			bytes, err := ioutil.ReadFile(itemPathOnFs + ":ipfs-alt-sync")
+			bytes, err := ioutil.ReadFile(itemPathOnFs + ":" + ALT_STREAM_NAME)
 			if err == nil {
 				stat, err := os.Stat(itemPathOnFs)
 				if err == nil {
-					buf := big.NewInt(stat.ModTime().Unix()).String()
-					if string(bytes) == (item.Hash + "|" + string(buf)) {
+					if string(bytes) == altStreamContentFormatter(item.Hash, stat.ModTime()) {
 						skippedFileCount += 1
 						continue
 					}
@@ -163,17 +162,28 @@ func sync(s *shell.Shell, srcHash string, target string) {
 				log.Fatal(err.Error())
 			}
 
-			alternateStream, err := os.Create(itemPathOnFs + ":ipfs-alt-sync")
+			alternateStream, err := os.Create(itemPathOnFs + ":" + ALT_STREAM_NAME)
 			if err != nil {
 				log.Fatal(err.Error())
 			}
 
-			buf := big.NewInt(stat.ModTime().Unix()).String()
-			alternateStream.WriteString(item.Hash + "|" + string(buf))
-			alternateStream.Close()
+			c := altStreamContentFormatter(item.Hash, stat.ModTime())
+			_, err = alternateStream.WriteString(c)
+			if err != nil {
+				log.Fatal(err.Error())
+			}
+			err = alternateStream.Close()
+			if err != nil {
+				log.Fatal(err.Error())
+			}
 
 		default:
 			log.Fatal("Unsupported item type present in ipfs stucture.")
 		}
 	}
+}
+
+func altStreamContentFormatter(hash string, modTime time.Time) string {
+	buf := big.NewInt(modTime.Unix()).String()
+	return hash + "|" + string(buf)
 }
