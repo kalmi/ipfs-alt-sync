@@ -5,23 +5,20 @@ import (
 	"github.com/jawher/mow.cli"
 	"os"
 	"github.com/ipfs/go-ipfs-api"
-	"path"
-	"io"
-	"io/ioutil"
-	"math/big"
-	"time"
+	"sync"
+	"sync/atomic"
 )
-
-const ALT_STREAM_NAME = "ipfs-alt-sync"
 
 var (
 	src *string
 	dst *string
-	processedFileCount int
-	skippedFileCount int
+	seenEntityCount uint64
+	seenFileCount uint64
+	processedEntityCount uint64
+	skippedEntityCount uint64
 )
 
-type DirMap map[string]int
+type dirMap map[string]int
 
 func main() {
 
@@ -58,132 +55,46 @@ func action() {
 		log.Fatal("Destination is not a directory.")
 	}
 
-	sync(shell, sourceHash, *dst)
+	syncDir(shell, sourceHash, *dst)
 
-	log.Print("Processed file count:")
-	log.Print(processedFileCount)
+	log.Print("Seen entity count:")
+	log.Print(atomic.LoadUint64(&seenEntityCount))
+	log.Print("Seen file count:")
+	log.Print(atomic.LoadUint64(&seenFileCount))
+	log.Print("Overwritten file count:")
+	log.Print(atomic.LoadUint64(&processedEntityCount))
 	log.Print("Skipped (already up-to-date) file count:")
-	log.Print(skippedFileCount)
+	log.Print(atomic.LoadUint64(&skippedEntityCount))
 }
 
-func sync(s *shell.Shell, srcHash string, target string) {
-	list, err := s.List(srcHash)
+func syncDir(shell *shell.Shell, srcHash string, target string) {
+	list, err := shell.List(srcHash)
 	if err != nil {
 		log.Fatal(err.Error())
 	}
-
-	sourceDirContentMap := make(DirMap)
-	for _, item := range list {
-		if item.Type == shell.TDirectory {
-			sourceDirContentMap[item.Name] = shell.TDirectory
-		} else {
-			sourceDirContentMap[item.Name] = shell.TFile
+	for _, item := range(list) {
+		task := &SyncTask{
+			shell: shell,
+			src: item,
+			dst_parent: target,
 		}
-	}
-
-	targetDirContent, err := ioutil.ReadDir(target)
-	for _, item := range targetDirContent {
-		fileType := shell.TRaw
-		if item.IsDir(){
-			fileType = shell.TDirectory
-		} else {
-			fileType = shell.TFile
-		}
-
-		if fileType != sourceDirContentMap[item.Name()] {
-			log.Print("Removing " + path.Join(target, item.Name()))
-			if fileType == shell.TDirectory {
-				err := os.RemoveAll(path.Join(target, item.Name()))
-				if err != nil {
-					log.Fatal(err.Error())
-				}
-			} else {
-				err := os.Remove(path.Join(target, item.Name()))
-				if err != nil {
-					log.Fatal(err.Error())
-				}
-			}
-		}
-
-	}
-
-
-	for _, item := range list {
-		log.Print(item.Hash + " - " + item.Name + " - " + target)
-		switch item.Type {
-		case shell.TDirectory:
-			sync(s, item.Hash, path.Join(target, item.Name))
-
-		case shell.TFile:
-			processedFileCount += 1
-
-			itemPathOnFs := path.Join(target, item.Name)
-			bytes, err := ioutil.ReadFile(itemPathOnFs + ":" + ALT_STREAM_NAME)
-			if err == nil {
-				stat, err := os.Stat(itemPathOnFs)
-				if err == nil {
-					if string(bytes) == altStreamContentFormatter(item.Hash, stat.ModTime()) {
-						skippedFileCount += 1
-						continue
-					}
-				}
-			}
-
-			r, err := s.Cat(item.Hash)
-			if err != nil {
-				log.Fatal(err.Error())
-			}
-
-			outFile, err := os.Create(itemPathOnFs)
-			if err != nil {
-				// Try creating the container directory
-				// (ipfs generates unixfs structures that don't contain directories for non-empty directories)
-				err := os.MkdirAll(target, os.ModePerm)
-				if err != nil {
-					// TODO: Is ENOTDIR possible here? If it is, then that should be handled by deleting the non-dir path. Maybe it is not possible if we process the entries in a sorted manner.
-					log.Fatal(err.Error())
-				}
-				//Okay, now lets try again with the parent directory in place now.
-				outFile, err = os.Create(itemPathOnFs)
-				if err != nil {
-					log.Fatal(err.Error())
-				}
-			}
-
-			_, err = io.Copy(outFile, r)
-			if err != nil {
-				log.Fatal(err.Error())
-			}
-
-			outFile.Close()
-
-			stat, err := os.Stat(itemPathOnFs)
-			if err != nil {
-				log.Fatal(err.Error())
-			}
-
-			alternateStream, err := os.Create(itemPathOnFs + ":" + ALT_STREAM_NAME)
-			if err != nil {
-				log.Fatal(err.Error())
-			}
-
-			c := altStreamContentFormatter(item.Hash, stat.ModTime())
-			_, err = alternateStream.WriteString(c)
-			if err != nil {
-				log.Fatal(err.Error())
-			}
-			err = alternateStream.Close()
-			if err != nil {
-				log.Fatal(err.Error())
-			}
-
-		default:
-			log.Fatal("Unsupported item type present in ipfs stucture.")
-		}
+		runTask(task)
 	}
 }
 
-func altStreamContentFormatter(hash string, modTime time.Time) string {
-	buf := big.NewInt(modTime.Unix()).String()
-	return hash + "|" + string(buf)
+func runTask(task *SyncTask){
+	tasks := Execute(task)
+
+	if len(tasks) > 0 {
+		var wg sync.WaitGroup
+		wg.Add(len(tasks))
+		for _, task := range tasks {
+			go func(task *SyncTask){
+				defer wg.Done()
+				runTask(task)
+			}(task)
+		}
+		wg.Wait()
+	}
 }
+
