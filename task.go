@@ -12,10 +12,10 @@ import (
 	"io"
 )
 
-const ALT_STREAM_NAME = "ipfs-alt-sync"
-const MaxOutstanding = 4 // Arbitary
+const altStreamName = "ipfs-alt-sync"
+const maxOutstanding = 4 // Arbitary
 
-var sem = make(chan int, MaxOutstanding)
+var sem = make(chan int, maxOutstanding)
 
 type SyncTask struct {
 	shell      *shell.Shell
@@ -138,7 +138,7 @@ func processFileSyncTask(t *SyncTask) ([]*SyncTask) {
 			log.Fatal(err.Error())
 		}
 
-		alternateStream, err := os.Create(p + ":" + ALT_STREAM_NAME)
+		alternateStream, err := os.Create(p + ":" + altStreamName)
 		if err != nil {
 			log.Fatal(err.Error())
 		}
@@ -159,7 +159,7 @@ func processFileSyncTask(t *SyncTask) ([]*SyncTask) {
 	}
 }
 func fileQuickMatches(path string, hash string) bool {
-	bytes, err := ioutil.ReadFile(path + ":" + ALT_STREAM_NAME)
+	bytes, err := ioutil.ReadFile(path + ":" + altStreamName)
 	if err == nil {
 		stat, err := os.Stat(path)
 		if err == nil {
