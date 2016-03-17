@@ -3,6 +3,7 @@ package main
 import (
 	"log"
 	"path"
+	"sync"
 	"sync/atomic"
 	"github.com/ipfs/go-ipfs-api"
 	"io/ioutil"
@@ -16,6 +17,7 @@ const altStreamName = "ipfs-alt-sync"
 const maxOutstanding = 4 // Arbitary
 
 var sem = make(chan int, maxOutstanding)
+var lock sync.Mutex
 
 type SyncTask struct {
 	shell      *shell.Shell
@@ -114,7 +116,9 @@ func processFileSyncTask(t *SyncTask) ([]*SyncTask) {
 		outFile, err := os.Create(p)
 		if err != nil {
 			// Try creating the container directory
-			err := os.MkdirAll(t.dst_parent, os.ModePerm) //TODO: race condition?
+			lock.Lock()
+			err := os.MkdirAll(t.dst_parent, os.ModePerm)
+			lock.Unlock()
 			if err != nil {
 				// TODO: Is ENOTDIR possible here? If it is, then that should be handled by deleting the non-dir path. Maybe it is not possible if we process the entries in a sorted manner.
 				log.Fatal(err.Error())
