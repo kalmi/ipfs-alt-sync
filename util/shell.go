@@ -1,4 +1,4 @@
-package main
+package util
 
 import (
 	"os"
@@ -12,7 +12,7 @@ import (
 	ma "github.com/jbenet/go-multiaddr-net/Godeps/_workspace/src/github.com/jbenet/go-multiaddr"
 )
 
-func getLocalShell() (*sh.Shell, error) {
+func GetLocalShell() (*sh.Shell, error) {
 	apiAddress := os.Getenv("IPFS_API")
 	if apiAddress != "" {
 		// IPFS_API takes priority.

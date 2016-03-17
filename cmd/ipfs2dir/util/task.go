@@ -1,28 +1,28 @@
-package main
+package util
 
 import (
+	"os"
+	"io"
+	"io/ioutil"
 	"log"
 	"path"
 	"sync"
-	"sync/atomic"
 	"github.com/ipfs/go-ipfs-api"
-	"io/ioutil"
-	"os"
-	"time"
-	"math/big"
-	"io"
+	"github.com/kalmi/ipfs-alt-sync/util"
 )
 
-const altStreamName = "ipfs-alt-sync"
 const maxOutstanding = 4 // Arbitary
 
 var sem = make(chan int, maxOutstanding)
 var lock sync.Mutex
 
+type dirMap map[string]int
+
 type SyncTask struct {
-	shell      *shell.Shell
-	dst_parent string
-	src        *shell.LsLink
+	Shell     *shell.Shell
+	DstParent string
+	Src       *shell.LsLink
+	Stat      *StatData
 }
 
 func Execute(t *SyncTask) ([]*SyncTask) {
@@ -33,23 +33,23 @@ func Execute(t *SyncTask) ([]*SyncTask) {
 		<-sem
 	}()
 
-	increment(&seenEntityCount)
+	incrementSeenEntityCount(t.Stat)
 
-	switch t.src.Type {
+	switch t.Src.Type {
 	case shell.TDirectory:
 		return processDirectorySyncTask(t)
 	case shell.TFile:
 		return processFileSyncTask(t)
 	default:
-		log.Fatal("Unsupported type in unixfs DAG of " + t.src.Name)
+		log.Fatal("Unsupported type in unixfs DAG of " + t.Src.Name)
 		return nil
 	}
 }
 
 func processDirectorySyncTask(t *SyncTask) ([]*SyncTask) {
-	p := path.Join(t.dst_parent, t.src.Name)
+	p := path.Join(t.DstParent, t.Src.Name)
 	//log.Print("Entering: " + t.src.Hash + " - " + p)
-	list, err := t.shell.List(t.src.Hash)
+	list, err := t.Shell.List(t.Src.Hash)
 	if err != nil {
 		log.Fatal(err.Error())
 	}
@@ -91,24 +91,25 @@ func processDirectorySyncTask(t *SyncTask) ([]*SyncTask) {
 	tasks := make([]*SyncTask, len(list), len(list))
 	for i, item := range list {
 		tasks[i] = &SyncTask{
-			shell: t.shell,
-			dst_parent: p,
-			src: item,
+			Shell: t.Shell,
+			DstParent: p,
+			Src: item,
+			Stat: t.Stat,
 		}
 	}
 	return tasks
 }
 
 func processFileSyncTask(t *SyncTask) ([]*SyncTask) {
-	increment(&seenFileCount)
-	p := path.Join(t.dst_parent, t.src.Name)
+	incrementSeenFileCount(t.Stat)
+	p := path.Join(t.DstParent, t.Src.Name)
 	//log.Print("Looking at: " + t.src.Hash + " - " + p)
-	if fileQuickMatches(p, t.src.Hash) {
+	if util.FileQuickMatches(p, t.Src.Hash) {
 		//log.Print("Skipped: " + t.src.Hash + " - " + p)
-		increment(&skippedEntityCount)
+		incrementSkippedEntityCount(t.Stat)
 		return nil
 	} else {
-		r, err := t.shell.Cat(t.src.Hash)
+		r, err := t.Shell.Cat(t.Src.Hash)
 		if err != nil {
 			log.Fatal(err.Error())
 		}
@@ -117,7 +118,7 @@ func processFileSyncTask(t *SyncTask) ([]*SyncTask) {
 		if err != nil {
 			// Try creating the container directory
 			lock.Lock()
-			err := os.MkdirAll(t.dst_parent, os.ModePerm)
+			err := os.MkdirAll(t.DstParent, os.ModePerm)
 			lock.Unlock()
 			if err != nil {
 				// TODO: Is ENOTDIR possible here? If it is, then that should be handled by deleting the non-dir path. Maybe it is not possible if we process the entries in a sorted manner.
@@ -142,44 +143,29 @@ func processFileSyncTask(t *SyncTask) ([]*SyncTask) {
 			log.Fatal(err.Error())
 		}
 
-		alternateStream, err := os.Create(p + ":" + altStreamName)
-		if err != nil {
-			log.Fatal(err.Error())
-		}
-
-		c := altStreamContentFormatter(t.src.Hash, stat.ModTime())
-		_, err = alternateStream.WriteString(c)
-		if err != nil {
-			log.Fatal(err.Error())
-		}
-		err = alternateStream.Close()
-		if err != nil {
-			log.Fatal(err.Error())
-		}
+		util.TagFile(p, util.TagData{
+			Hash: t.Src.Hash,
+			ModTime: stat.ModTime(),
+		})
 
 		//log.Print("Done: " + t.src.Hash + " - " + p)
-		increment(&processedEntityCount)
+		incrementProcessedEntityCount(t.Stat)
 		return nil // It was not a directory, so no new tasks were created
 	}
 }
-func fileQuickMatches(path string, hash string) bool {
-	bytes, err := ioutil.ReadFile(path + ":" + altStreamName)
-	if err == nil {
-		stat, err := os.Stat(path)
-		if err == nil {
-			if string(bytes) == altStreamContentFormatter(hash, stat.ModTime()) {
-				return true
-			}
+
+func RunTask(task *SyncTask){
+	tasks := Execute(task)
+
+	if len(tasks) > 0 {
+		var wg sync.WaitGroup
+		wg.Add(len(tasks))
+		for _, task := range tasks {
+			go func(task *SyncTask){
+				defer wg.Done()
+				RunTask(task)
+			}(task)
 		}
+		wg.Wait()
 	}
-	return false
-}
-
-func altStreamContentFormatter(hash string, modTime time.Time) string {
-	buf := big.NewInt(modTime.Unix()).String()
-	return hash + "|" + string(buf)
-}
-
-func increment(i *uint64) {
-	atomic.AddUint64(i, 1)
 }

@@ -1,24 +1,19 @@
 package main
 
 import (
-	"log"
-	"github.com/jawher/mow.cli"
 	"os"
+	"log"
+	util "github.com/kalmi/ipfs-alt-sync/util"
+	ipfs2dir "github.com/kalmi/ipfs-alt-sync/cmd/ipfs2dir/util"
+	"github.com/jawher/mow.cli"
 	"github.com/ipfs/go-ipfs-api"
-	"sync"
-	"sync/atomic"
 )
 
 var (
 	src *string
 	dst *string
-	seenEntityCount uint64
-	seenFileCount uint64
-	processedEntityCount uint64
-	skippedEntityCount uint64
+	stat ipfs2dir.StatData
 )
-
-type dirMap map[string]int
 
 func main() {
 
@@ -30,7 +25,7 @@ func main() {
 }
 
 func action() {
-	shell, err := getLocalShell()
+	shell, err := util.GetLocalShell()
 	if (err != nil) {
 		log.Fatal("Could not find ipfs daemon: " + err.Error())
 	}
@@ -56,15 +51,7 @@ func action() {
 	}
 
 	syncDir(shell, sourceHash, *dst)
-
-	log.Print("Seen entity count:")
-	log.Print(atomic.LoadUint64(&seenEntityCount))
-	log.Print("Seen file count:")
-	log.Print(atomic.LoadUint64(&seenFileCount))
-	log.Print("Overwritten file count:")
-	log.Print(atomic.LoadUint64(&processedEntityCount))
-	log.Print("Skipped (already up-to-date) file count:")
-	log.Print(atomic.LoadUint64(&skippedEntityCount))
+	ipfs2dir.PrintStats(&stat)
 }
 
 func syncDir(shell *shell.Shell, srcHash string, target string) {
@@ -73,28 +60,13 @@ func syncDir(shell *shell.Shell, srcHash string, target string) {
 		log.Fatal(err.Error())
 	}
 	for _, item := range(list) {
-		task := &SyncTask{
-			shell: shell,
-			src: item,
-			dst_parent: target,
+		task := &ipfs2dir.SyncTask{
+			Shell: shell,
+			Src: item,
+			DstParent: target,
+			Stat: &stat,
 		}
-		runTask(task)
-	}
-}
-
-func runTask(task *SyncTask){
-	tasks := Execute(task)
-
-	if len(tasks) > 0 {
-		var wg sync.WaitGroup
-		wg.Add(len(tasks))
-		for _, task := range tasks {
-			go func(task *SyncTask){
-				defer wg.Done()
-				runTask(task)
-			}(task)
-		}
-		wg.Wait()
+		ipfs2dir.RunTask(task)
 	}
 }
 
