@@ -1,13 +1,13 @@
-package util
+package ipfs2dir
 
 import "log"
 import "sync/atomic"
 
 type StatData struct {
-	seenEntityCount uint64
-	seenFileCount uint64
+	seenEntityCount      uint64
+	seenFileCount        uint64
 	processedEntityCount uint64
-	skippedEntityCount uint64
+	skippedEntityCount   uint64
 }
 
 func incrementSeenEntityCount(stat *StatData) {

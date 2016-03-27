@@ -1,14 +1,14 @@
-package util
+package ipfs2dir
 
 import (
-	"os"
+	"github.com/ipfs/go-ipfs-api"
+	"github.com/kalmi/ipfs-alt-sync/util"
 	"io"
 	"io/ioutil"
 	"log"
+	"os"
 	"path"
 	"sync"
-	"github.com/ipfs/go-ipfs-api"
-	"github.com/kalmi/ipfs-alt-sync/util"
 )
 
 const maxOutstanding = 4 // Arbitary
@@ -25,7 +25,7 @@ type SyncTask struct {
 	Stat      *StatData
 }
 
-func Execute(t *SyncTask) ([]*SyncTask) {
+func Execute(t *SyncTask) []*SyncTask {
 	// Block until there's capacity to process a request
 	// (only MaxOutstanding number of requests are allowed to go to the ipfs daemon at the same time)
 	sem <- 1
@@ -46,7 +46,7 @@ func Execute(t *SyncTask) ([]*SyncTask) {
 	}
 }
 
-func processDirectorySyncTask(t *SyncTask) ([]*SyncTask) {
+func processDirectorySyncTask(t *SyncTask) []*SyncTask {
 	p := path.Join(t.DstParent, t.Src.Name)
 	//log.Print("Entering: " + t.src.Hash + " - " + p)
 	list, err := t.Shell.List(t.Src.Hash)
@@ -91,16 +91,16 @@ func processDirectorySyncTask(t *SyncTask) ([]*SyncTask) {
 	tasks := make([]*SyncTask, len(list), len(list))
 	for i, item := range list {
 		tasks[i] = &SyncTask{
-			Shell: t.Shell,
+			Shell:     t.Shell,
 			DstParent: p,
-			Src: item,
-			Stat: t.Stat,
+			Src:       item,
+			Stat:      t.Stat,
 		}
 	}
 	return tasks
 }
 
-func processFileSyncTask(t *SyncTask) ([]*SyncTask) {
+func processFileSyncTask(t *SyncTask) []*SyncTask {
 	incrementSeenFileCount(t.Stat)
 	p := path.Join(t.DstParent, t.Src.Name)
 	//log.Print("Looking at: " + t.src.Hash + " - " + p)
@@ -144,7 +144,7 @@ func processFileSyncTask(t *SyncTask) ([]*SyncTask) {
 		}
 
 		util.TagFile(p, util.TagData{
-			Hash: t.Src.Hash,
+			Hash:    t.Src.Hash,
 			ModTime: stat.ModTime(),
 		})
 
@@ -154,14 +154,14 @@ func processFileSyncTask(t *SyncTask) ([]*SyncTask) {
 	}
 }
 
-func RunTask(task *SyncTask){
+func RunTask(task *SyncTask) {
 	tasks := Execute(task)
 
 	if len(tasks) > 0 {
 		var wg sync.WaitGroup
 		wg.Add(len(tasks))
 		for _, task := range tasks {
-			go func(task *SyncTask){
+			go func(task *SyncTask) {
 				defer wg.Done()
 				RunTask(task)
 			}(task)
