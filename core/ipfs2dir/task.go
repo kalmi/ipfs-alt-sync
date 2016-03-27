@@ -33,7 +33,7 @@ func Execute(t *SyncTask) []*SyncTask {
 		<-sem
 	}()
 
-	incrementSeenEntityCount(t.Stat)
+	t.Stat.Increment(SeenEntityCount)
 
 	switch t.Src.Type {
 	case shell.TDirectory:
@@ -101,12 +101,12 @@ func processDirectorySyncTask(t *SyncTask) []*SyncTask {
 }
 
 func processFileSyncTask(t *SyncTask) []*SyncTask {
-	incrementSeenFileCount(t.Stat)
+	t.Stat.Increment(SeenFileCount)
 	p := path.Join(t.DstParent, t.Src.Name)
 	//log.Print("Looking at: " + t.src.Hash + " - " + p)
 	if util.FileQuickMatches(p, t.Src.Hash) {
 		//log.Print("Skipped: " + t.src.Hash + " - " + p)
-		incrementSkippedEntityCount(t.Stat)
+		t.Stat.Increment(SkippedEntityCount)
 		return nil
 	} else {
 		r, err := t.Shell.Cat(t.Src.Hash)
@@ -149,7 +149,7 @@ func processFileSyncTask(t *SyncTask) []*SyncTask {
 		})
 
 		//log.Print("Done: " + t.src.Hash + " - " + p)
-		incrementProcessedEntityCount(t.Stat)
+		t.Stat.Increment(ProcessedEntityCount)
 		return nil // It was not a directory, so no new tasks were created
 	}
 }

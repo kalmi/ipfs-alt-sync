@@ -39,7 +39,7 @@ func main() {
 		}
 		var stat ipfs2dir.StatData
 		ipfs2dir.SyncDir(shell, sourceHash, *dst, &stat)
-		ipfs2dir.PrintStats(&stat)
+		stat.Print()
 	}
 	app.Run(os.Args)
 }
